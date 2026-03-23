@@ -88,7 +88,7 @@ def audio(video_id):
         )
 
         if result.returncode != 0:
-            return jsonify({"error": "failed to get audio info"}), 500
+            return jsonify({"error": "yt-dlp failed", "stderr": result.stderr[:500]}), 500
 
         data = json.loads(result.stdout)
 
