@@ -19,7 +19,7 @@ def check_key():
 
 @app.before_request
 def auth():
-    if request.path == "/health":
+    if request.path in ("/health", "/"):
         return
     if not check_key():
         return jsonify({"error": "unauthorized"}), 401
@@ -27,6 +27,14 @@ def auth():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
+
+@app.route("/")
+def index():
+    try:
+        with open("index.html", "r") as f:
+            return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
+    except:
+        return "Muse API", 200
 
 @app.route("/search")
 def search():
