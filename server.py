@@ -75,47 +75,78 @@ def search():
 
 @app.route("/audio/<video_id>")
 def audio(video_id):
-    """Get direct audio URL for a video"""
+    """Get direct audio URL for a video using innertube API"""
     if not video_id or len(video_id) > 20:
         return jsonify({"error": "invalid video id"}), 400
 
+    import urllib.request
+    import urllib.error
+
     try:
-        result = subprocess.run(
-            ["yt-dlp", "-f", "bestaudio[ext=m4a]/bestaudio",
-             "--dump-json", "--no-download",
-             f"https://www.youtube.com/watch?v={video_id}"],
-            capture_output=True, text=True, timeout=30
+        # Use YouTube's innertube API directly - no cookies needed
+        innertube_url = "https://www.youtube.com/youtubei/v1/player"
+        payload = json.dumps({
+            "videoId": video_id,
+            "context": {
+                "client": {
+                    "clientName": "ANDROID",
+                    "clientVersion": "19.09.37",
+                    "androidSdkVersion": 30,
+                    "hl": "en",
+                    "gl": "US"
+                }
+            }
+        }).encode()
+
+        req = urllib.request.Request(
+            innertube_url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
+            }
         )
 
-        if result.returncode != 0:
-            return jsonify({"error": "yt-dlp failed", "stderr": result.stderr[:500]}), 500
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
 
-        data = json.loads(result.stdout)
+        # Get video details
+        video_details = data.get("videoDetails", {})
+        streaming_data = data.get("streamingData", {})
 
-        # Find best audio format
-        formats = data.get("formats", [])
-        audio_formats = [f for f in formats if f.get("acodec") != "none" and f.get("vcodec") in ("none", None)]
+        # Find audio formats from adaptiveFormats
+        adaptive = streaming_data.get("adaptiveFormats", [])
+        audio_formats = [f for f in adaptive if f.get("mimeType", "").startswith("audio/")]
 
-        # Prefer m4a, then any audio
-        m4a = [f for f in audio_formats if f.get("ext") == "m4a"]
+        # Prefer m4a/mp4a
+        m4a = [f for f in audio_formats if "mp4a" in f.get("mimeType", "")]
         best = m4a[-1] if m4a else (audio_formats[-1] if audio_formats else None)
 
         if not best:
             return jsonify({"error": "no audio found"}), 404
 
+        audio_url = best.get("url", "")
+        if not audio_url:
+            # Handle signature cipher
+            cipher = best.get("signatureCipher", "")
+            if cipher:
+                from urllib.parse import parse_qs
+                params = parse_qs(cipher)
+                audio_url = params.get("url", [""])[0]
+
         return jsonify({
-            "url": best.get("url", ""),
-            "ext": best.get("ext", "m4a"),
-            "quality": best.get("format_note", ""),
-            "filesize": best.get("filesize", 0),
-            "title": data.get("title", ""),
-            "author": data.get("channel", data.get("uploader", "")),
-            "duration": data.get("duration", 0),
-            "thumbnail": data.get("thumbnail", "")
+            "url": audio_url,
+            "ext": "m4a",
+            "quality": best.get("audioQuality", ""),
+            "filesize": int(best.get("contentLength", 0)),
+            "title": video_details.get("title", ""),
+            "author": video_details.get("author", ""),
+            "duration": int(video_details.get("lengthSeconds", 0)),
+            "thumbnail": video_details.get("thumbnail", {}).get("thumbnails", [{}])[-1].get("url", "")
         })
 
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "timeout"}), 504
+    except urllib.error.HTTPError as e:
+        return jsonify({"error": f"YouTube API error: {e.code}"}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
