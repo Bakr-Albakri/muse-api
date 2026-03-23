@@ -7,5 +7,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
+COPY index.html .
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "60", "--workers", "2", "server:app"]
